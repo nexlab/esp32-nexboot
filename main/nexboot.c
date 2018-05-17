@@ -11,6 +11,8 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
+#include "https_server.h"
+
 /* You can set Wifi configuration via
    'make menuconfig'.
 
@@ -32,6 +34,23 @@ const int WIFI_CONNECTED_BIT = BIT0;
 
 static const char *TAG = "Nexboot";
 
+http_server_t server;
+
+esp_err_t httpd_start(void)
+{
+   ESP_LOGI(TAG, "Starting HTTPD...");
+#if HTTPS_SERVER
+   http_server_options_t http_options = HTTPS_SERVER_OPTIONS_DEFAULT();
+#else
+   http_server_options_t http_options = HTTP_SERVER_OPTIONS_DEFAULT();
+#endif
+   esp_err_t res;
+
+   ESP_ERROR_CHECK( res = http_server_start(&http_options, &server) );
+	ESP_LOGI(TAG, "HTTPD Started");
+   return res;
+}
+
 static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
     switch(event->event_id) {
@@ -42,6 +61,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
         ESP_LOGI(TAG, "got ip:%s",
                  ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+		  ESP_ERROR_CHECK(httpd_start());
         break;
     case SYSTEM_EVENT_AP_STACONNECTED:
         ESP_LOGI(TAG, "station:"MACSTR" join, AID=%d",
@@ -54,6 +74,9 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
                  event->event_info.sta_disconnected.aid);
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
+        ESP_LOGI(TAG, "Stopping HTTPD");
+		  ESP_ERROR_CHECK(http_server_stop(server));
+		  ESP_LOGI(TAG, "HTTPD Stopped");
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
         break;
@@ -92,6 +115,7 @@ void wifi_init_softap()
 
     ESP_LOGI(TAG, "wifi_init_softap finished.SSID:%s password:%s",
              ESP_WIFI_SSID, ESP_WIFI_PASS);
+	 ESP_ERROR_CHECK(httpd_start());
 }
 
 #else // if ESP_WIFI_MODE_AP
