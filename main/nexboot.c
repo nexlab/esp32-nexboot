@@ -31,6 +31,7 @@ static EventGroupHandle_t wifi_event_group;
    but we only care about one event - are we connected
    to the AP with an IP? */
 const int WIFI_CONNECTED_BIT = BIT0;
+bool HTTPD_RUNNING = 0;
 
 static const char *TAG = "Nexboot";
 
@@ -61,7 +62,11 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
         ESP_LOGI(TAG, "got ip:%s",
                  ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
-		  ESP_ERROR_CHECK(httpd_start());
+        if(!HTTPD_RUNNING)
+        {
+		     ESP_ERROR_CHECK(httpd_start());
+           HTTPD_RUNNING = 1;
+        }
         break;
     case SYSTEM_EVENT_AP_STACONNECTED:
         ESP_LOGI(TAG, "station:"MACSTR" join, AID=%d",
@@ -74,9 +79,13 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
                  event->event_info.sta_disconnected.aid);
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
-        ESP_LOGI(TAG, "Stopping HTTPD");
-		  ESP_ERROR_CHECK(http_server_stop(server));
-		  ESP_LOGI(TAG, "HTTPD Stopped");
+        if(HTTPD_RUNNING) 
+        {
+           ESP_LOGI(TAG, "Stopping HTTPD");
+		     ESP_ERROR_CHECK(http_server_stop(server));
+           HTTPD_RUNNING = 0;
+		     ESP_LOGI(TAG, "HTTPD Stopped");
+        }
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
         break;
@@ -116,6 +125,7 @@ void wifi_init_softap()
     ESP_LOGI(TAG, "wifi_init_softap finished.SSID:%s password:%s",
              ESP_WIFI_SSID, ESP_WIFI_PASS);
 	 ESP_ERROR_CHECK(httpd_start());
+    HTTPD_RUNNING = 1;
 }
 
 #else // if ESP_WIFI_MODE_AP
