@@ -1,3 +1,3 @@
-[submodule "components/esp32-http-server"]
-	path = components/esp32-http-server
-	url = https://git.nexlab.net/esp/esp32-http-server.git
+[submodule "components/mongoose"]
+	path = components/mongoose
+	url = https://git.nexlab.net/esp/mongoose.git

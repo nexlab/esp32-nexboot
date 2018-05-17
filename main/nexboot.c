@@ -11,7 +11,9 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
-#include "https_server.h"
+//#include "https_server.h"
+#include "mongoose.h"
+#include "nexboot.h"
 
 /* You can set Wifi configuration via
    'make menuconfig'.
@@ -24,6 +26,8 @@
 #define ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
 #define MAX_STA_CONN       CONFIG_MAX_STA_CONN
 
+#define MG_LISTEN_ADDR "80"
+
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t wifi_event_group;
 
@@ -31,26 +35,8 @@ static EventGroupHandle_t wifi_event_group;
    but we only care about one event - are we connected
    to the AP with an IP? */
 const int WIFI_CONNECTED_BIT = BIT0;
-bool HTTPD_RUNNING = 0;
 
 static const char *TAG = "Nexboot";
-
-http_server_t server;
-
-esp_err_t httpd_start(void)
-{
-   ESP_LOGI(TAG, "Starting HTTPD...");
-#if HTTPS_SERVER
-   http_server_options_t http_options = HTTPS_SERVER_OPTIONS_DEFAULT();
-#else
-   http_server_options_t http_options = HTTP_SERVER_OPTIONS_DEFAULT();
-#endif
-   esp_err_t res;
-
-   ESP_ERROR_CHECK( res = http_server_start(&http_options, &server) );
-	ESP_LOGI(TAG, "HTTPD Started");
-   return res;
-}
 
 static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
@@ -62,11 +48,6 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
         ESP_LOGI(TAG, "got ip:%s",
                  ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
-        if(!HTTPD_RUNNING)
-        {
-		     ESP_ERROR_CHECK(httpd_start());
-           HTTPD_RUNNING = 1;
-        }
         break;
     case SYSTEM_EVENT_AP_STACONNECTED:
         ESP_LOGI(TAG, "station:"MACSTR" join, AID=%d",
@@ -79,13 +60,6 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
                  event->event_info.sta_disconnected.aid);
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
-        if(HTTPD_RUNNING) 
-        {
-           ESP_LOGI(TAG, "Stopping HTTPD");
-		     ESP_ERROR_CHECK(http_server_stop(server));
-           HTTPD_RUNNING = 0;
-		     ESP_LOGI(TAG, "HTTPD Stopped");
-        }
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
         break;
@@ -124,8 +98,6 @@ void wifi_init_softap()
 
     ESP_LOGI(TAG, "wifi_init_softap finished.SSID:%s password:%s",
              ESP_WIFI_SSID, ESP_WIFI_PASS);
-	 ESP_ERROR_CHECK(httpd_start());
-    HTTPD_RUNNING = 1;
 }
 
 #else // if ESP_WIFI_MODE_AP
@@ -157,6 +129,66 @@ void wifi_init_sta()
 
 #endif // if ESP_WIFI_MODE_AP
 
+
+static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
+  static const char *reply_fmt =
+      "HTTP/1.0 200 OK\r\n"
+      "Connection: close\r\n"
+      "Content-Type: text/plain\r\n"
+      "\r\n"
+      "Hello %s\n";
+
+  switch (ev) {
+    case MG_EV_ACCEPT: {
+      char addr[32];
+      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr),
+                          MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+      ESP_LOGI(TAG, "Connection %p from %s\n", nc, addr);
+      break;
+    }
+    case MG_EV_HTTP_REQUEST: {
+      char addr[32];
+      struct http_message *hm = (struct http_message *) p;
+      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr),
+                          MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+      ESP_LOGI(TAG, "HTTP request from %s: %.*s %.*s\n", addr, (int) hm->method.len,
+             hm->method.p, (int) hm->uri.len, hm->uri.p);
+      mg_printf(nc, reply_fmt, addr);
+      nc->flags |= MG_F_SEND_AND_CLOSE;
+      break;
+    }
+    case MG_EV_CLOSE: {
+      ESP_LOGI(TAG, "Connection %p closed\n", nc);
+      break;
+    }
+  }
+}
+
+
+void mongooseTask(void *data) {
+	ESP_LOGI(TAG, "Mongoose task starting");
+	struct mg_mgr mgr;
+   struct mg_connection *nc;
+
+	ESP_LOGD(TAG, "Mongoose: Starting setup");
+	mg_mgr_init(&mgr, NULL);
+	ESP_LOGD(TAG, "Mongoose succesfully inited");
+
+   nc = mg_bind(&mgr, MG_LISTEN_ADDR, mg_ev_handler);
+	ESP_LOGI(TAG, "Webserver uccessfully bound on port %s\n", MG_LISTEN_ADDR);
+	if (nc == NULL) {
+		ESP_LOGE(TAG, "No connection from the mg_bind()");
+		vTaskDelete(NULL);
+		return;
+	}
+	mg_set_protocol_http_websocket(nc);
+
+	while (1) {
+		mg_mgr_poll(&mgr, 1000);
+	}
+} 
+
+
 void app_main()
 {
     //Initialize NVS
@@ -175,4 +207,7 @@ void app_main()
     wifi_init_sta();
 #endif /*ESP_WIFI_MODE_AP*/
 
+    // Start Mongoose task
+	 xTaskCreatePinnedToCore(&mongooseTask, "mongooseTask", 20000, NULL, 5, NULL,0);
+    
 }
