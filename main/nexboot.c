@@ -6,6 +6,9 @@
 #include "esp_wifi.h"
 #include "esp_event_loop.h"
 #include "esp_log.h"
+#include "esp_spi_flash.h"
+#include "esp_ota_ops.h"
+
 #include "nvs_flash.h"
 
 #include "lwip/err.h"
@@ -13,7 +16,7 @@
 
 //#include "https_server.h"
 #include "mongoose.h"
-#include "nexboot.h"
+#include "html.h"
 
 /* You can set Wifi configuration via
    'make menuconfig'.
@@ -130,13 +133,25 @@ void wifi_init_sta()
 #endif // if ESP_WIFI_MODE_AP
 
 
+// Convert a mongoose string to a string
+char *mgStrToStr(struct mg_str mgStr) {
+	char *retStr = (char *) malloc(mgStr.len + 1);
+	memcpy(retStr, mgStr.p, mgStr.len);
+	retStr[mgStr.len] = 0;
+	return retStr;
+} 
+
+struct fwriter_data {
+   const esp_partition_t *update_partition;
+   char recv_buf[1024];
+   esp_ota_handle_t update_handle;
+   size_t bytes_written;
+};
+
+
 static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
-  static const char *reply_fmt =
-      "HTTP/1.0 200 OK\r\n"
-      "Connection: close\r\n"
-      "Content-Type: text/plain\r\n"
-      "\r\n"
-      "Hello %s\n";
+  struct fwriter_data *data = (struct fwriter_data *) nc->user_data;
+  struct mg_http_multipart_part *mp = (struct mg_http_multipart_part *) p;
 
   switch (ev) {
     case MG_EV_ACCEPT: {
@@ -149,17 +164,56 @@ static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
     case MG_EV_HTTP_REQUEST: {
       char addr[32];
       struct http_message *hm = (struct http_message *) p;
+		char *uri = mgStrToStr(hm->uri);
+      char *method = mgStrToStr(hm->method);
       mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr),
                           MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
       ESP_LOGI(TAG, "HTTP request from %s: %.*s %.*s\n", addr, (int) hm->method.len,
              hm->method.p, (int) hm->uri.len, hm->uri.p);
-      mg_printf(nc, reply_fmt, addr);
+		
+		if(strcmp(uri, "/") == 0) {
+         if(!strcmp(method, "POST") == 0) {
+            mg_send_head(nc, 200, index_html_len, "Content-Type: text/html");
+            mg_send(nc, index_html, index_html_len);
+         }
+		} else {
+			mg_send_head(nc, 404, 0, "Content-Type: text/plain");
+		}
       nc->flags |= MG_F_SEND_AND_CLOSE;
+		free(uri);
+      break;
+    }
+    case MG_EV_HTTP_PART_BEGIN: {
+       ESP_LOGI(TAG, "Starting upload file from %p\n", nc);
+       if (data == NULL) {
+          data = calloc(1, sizeof(struct fwriter_data));
+          data->bytes_written = 0;
+          data->update_partition = NULL;
+          data->update_handle = 0;
+       }
+       nc->user_data = (void *) data;
+       break;
+    }
+    case MG_EV_HTTP_PART_DATA: {
+      data->bytes_written += mp->data.len;
+      ESP_LOGD(TAG, "MG_EV_HTTP_PART_DATA %p len %d\n", nc, mp->data.len);
+      break;
+    } 
+    case MG_EV_HTTP_PART_END: {
+      mg_printf(nc,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/plain\r\n"
+                "Connection: close\r\n\r\n"
+                "Written POST data to OTA partition\n\n");
+
+      nc->flags |= MG_F_SEND_AND_CLOSE;
+      free(data);
+      nc->user_data = NULL;
       break;
     }
     case MG_EV_CLOSE: {
-      ESP_LOGI(TAG, "Connection %p closed\n", nc);
-      break;
+       ESP_LOGI(TAG, "Connection %p closed\n", nc);
+       break;
     }
   }
 }
@@ -175,7 +229,7 @@ void mongooseTask(void *data) {
 	ESP_LOGD(TAG, "Mongoose succesfully inited");
 
    nc = mg_bind(&mgr, MG_LISTEN_ADDR, mg_ev_handler);
-	ESP_LOGI(TAG, "Webserver uccessfully bound on port %s\n", MG_LISTEN_ADDR);
+	ESP_LOGI(TAG, "Webserver successfully bound on port %s\n", MG_LISTEN_ADDR);
 	if (nc == NULL) {
 		ESP_LOGE(TAG, "No connection from the mg_bind()");
 		vTaskDelete(NULL);
