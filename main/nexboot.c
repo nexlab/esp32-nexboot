@@ -143,7 +143,6 @@ char *mgStrToStr(struct mg_str mgStr) {
 
 struct fwriter_data {
    const esp_partition_t *update_partition;
-   char recv_buf[1024];
    esp_ota_handle_t update_handle;
    size_t bytes_written;
 };
@@ -190,13 +189,26 @@ static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
           data->bytes_written = 0;
           data->update_partition = NULL;
           data->update_handle = 0;
+
+          data->update_partition = esp_ota_get_next_update_partition(NULL);
+          ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x\n",
+                    data->update_partition->subtype, data->update_partition->address);
+          if(data->update_partition == NULL) ESP_ERROR_CHECK(ESP_FAIL);
+          ESP_ERROR_CHECK(esp_ota_begin(data->update_partition, OTA_SIZE_UNKNOWN, &data->update_handle));
+
+          ESP_LOGI(TAG, "esp_ota_begin succeeded\n");
+
+
        }
        nc->user_data = (void *) data;
+
        break;
     }
     case MG_EV_HTTP_PART_DATA: {
+
       data->bytes_written += mp->data.len;
-      ESP_LOGD(TAG, "MG_EV_HTTP_PART_DATA %p len %d\n", nc, mp->data.len);
+      ESP_LOGI(TAG, "MG_EV_HTTP_PART_DATA %p len %d\n", nc, mp->data.len);
+      ESP_ERROR_CHECK(esp_ota_write( data->update_handle, (void *)mp->data.p, mp->data.len));
       break;
     } 
     case MG_EV_HTTP_PART_END: {
