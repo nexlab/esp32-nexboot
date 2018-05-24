@@ -207,13 +207,14 @@ static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
     case MG_EV_HTTP_PART_DATA: {
 
       data->bytes_written += mp->data.len;
-      ESP_LOGI(TAG, "MG_EV_HTTP_PART_DATA %p len %d\n", nc, mp->data.len);
+      ESP_LOGD(TAG, "MG_EV_HTTP_PART_DATA %p len %d\n", nc, mp->data.len);
       ESP_ERROR_CHECK(esp_ota_write( data->update_handle, (void *)mp->data.p, mp->data.len));
 
 
       break;
     } 
     case MG_EV_HTTP_PART_END: {
+      ESP_LOGI(TAG, "Upload done, filesize: %d\n", mp->data.len);
       mg_printf(nc,
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: text/plain\r\n"
@@ -221,10 +222,10 @@ static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
                 "Written POST data to OTA partition\n\n");
 
       nc->flags |= MG_F_SEND_AND_CLOSE;
-      free(data);
       nc->user_data = NULL;
       ESP_ERROR_CHECK(esp_ota_end(data->update_handle));
       ESP_ERROR_CHECK(esp_ota_set_boot_partition(data->update_partition));
+      free(data);
       ESP_LOGI(TAG,"Booting update... ");
       esp_restart();
       break;
