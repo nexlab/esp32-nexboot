@@ -17,12 +17,19 @@
 
 #include "esp_log.h"
 #include "rom/gpio.h"
+#include "soc/gpio_reg.h"
 #include "bootloader_config.h"
 #include "bootloader_init.h"
 #include "bootloader_utility.h"
 #include "bootloader_common.h"
 #include "sdkconfig.h"
 #include "esp_image_format.h"
+#include "soc/rtc_io_reg.h"
+#include "soc/io_mux_reg.h"
+
+
+#define GPIO_PIN_REG_26         IO_MUX_GPIO26_REG
+#define BOOT_GPIO26             CONFIG_ESP_BOOT_GPIO26
 
 static const char* TAG = "boot";
 
@@ -39,6 +46,24 @@ void call_start_cpu0()
     if(bootloader_init() != ESP_OK){
         return;
     }
+
+#if BOOT_GPIO26
+    // SET GPIO26 as input
+    // REG_CLR_BIT(GPIO_ENABLE_REG, BIT26);
+    // rtc_gpio_deinit(GPIO_NUM_26);
+    CLEAR_PERI_REG_MASK(RTC_IO_TOUCH_PAD3_REG, RTC_IO_TOUCH_PAD3_MUX_SEL_M);
+
+    //gpio_pad_select_gpio(GPIO_NUM_26);
+    PIN_FUNC_SELECT(GPIO_PIN_REG_26, PIN_FUNC_GPIO);
+  
+    //gpio_set_direction(GPIO_NUM_26, GPIO_MODE_INPUT);
+    PIN_INPUT_ENABLE(GPIO_PIN_REG_26);
+    REG_WRITE(GPIO_ENABLE_W1TC_REG, BIT26);
+  
+    //gpio_set_pull_mode(GPIO_NUM_26, GPIO_PULLUP_ONLY);
+    REG_CLR_BIT(GPIO_PIN_REG_26, FUN_PD);
+    REG_SET_BIT(GPIO_PIN_REG_26, FUN_PU);
+#endif
 
     // 2. Select image to boot
     esp_image_metadata_t image_data;
@@ -83,11 +108,14 @@ static int selected_boot_partition(const bootloader_state_t *bs)
     if (boot_index == INVALID_INDEX) {
         return boot_index; // Unrecoverable failure (not due to corrupt ota data or bad partition contents)
     } else {
+#if BOOT_GPIO26
         // Check for reset to the factory firmware or for launch OTA[x] firmware.
         // Customer implementation.
-        // if (gpio_pin_1 == true && ...){
-        //     boot_index = required_boot_partition;
-        // } ...
-    }
+        if ( REG_GET_BIT(GPIO_IN_REG, BIT26) == BIT26) {
+				ESP_LOGE(TAG, "GPIO 26 PRESSED: Booting on FACTORY_INDEX\n");
+            boot_index = FACTORY_INDEX;
+        } 
+#endif
+    } 
     return boot_index;
 }

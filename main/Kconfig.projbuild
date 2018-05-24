@@ -1,5 +1,11 @@
 menu "Nexboot Configuration"
-  
+ 
+config ESP_BOOT_GPIO26
+   bool "Enable GPIO26 force bootloader"
+   default y
+   help
+      Whether or not GPIO26 is enabled during boot to force bootloader mode
+
 choice ESP_WIFI_MODE
     prompt "AP or STA"
     default ESP_WIFI_IS_STATION

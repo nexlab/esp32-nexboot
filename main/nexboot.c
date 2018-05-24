@@ -209,6 +209,8 @@ static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
       data->bytes_written += mp->data.len;
       ESP_LOGI(TAG, "MG_EV_HTTP_PART_DATA %p len %d\n", nc, mp->data.len);
       ESP_ERROR_CHECK(esp_ota_write( data->update_handle, (void *)mp->data.p, mp->data.len));
+
+
       break;
     } 
     case MG_EV_HTTP_PART_END: {
@@ -221,6 +223,10 @@ static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
       nc->flags |= MG_F_SEND_AND_CLOSE;
       free(data);
       nc->user_data = NULL;
+      ESP_ERROR_CHECK(esp_ota_end(data->update_handle));
+      ESP_ERROR_CHECK(esp_ota_set_boot_partition(data->update_partition));
+      ESP_LOGI(TAG,"Booting update... ");
+      esp_restart();
       break;
     }
     case MG_EV_CLOSE: {
