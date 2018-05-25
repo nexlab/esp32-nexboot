@@ -22,7 +22,7 @@ i started to write my own.
 ### Features
  * update OTA over WiFi, in AP or STA mode, wpa2 supported.
  * update OTA via web browser, on the ESP32 board IP
- * Force bootloader mode on boot by activating GPIO26
+ * Optionally force bootloader mode on boot by activating GPIO26
  * It leave you 3MB of space for your OTA firmware ( with a 4MB flash )
  
 ### Planned
