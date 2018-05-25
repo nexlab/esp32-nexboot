@@ -175,6 +175,12 @@ static void mg_ev_handler(struct mg_connection *nc, int ev, void *p) {
             mg_send_head(nc, 200, index_html_len, "Content-Type: text/html");
             mg_send(nc, index_html, index_html_len);
          }
+      } else if(strcmp(uri, "/reboot") == 0) {
+         mg_send_head(nc, 200, reboot_html_len, "Content-Type: text/html");
+         mg_send(nc, reboot_html, reboot_html_len);
+         ESP_LOGI(TAG,"Rebooting... ");
+         esp_restart();
+
 		} else {
 			mg_send_head(nc, 404, 0, "Content-Type: text/plain");
 		}

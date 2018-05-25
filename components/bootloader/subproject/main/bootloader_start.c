@@ -112,7 +112,7 @@ static int selected_boot_partition(const bootloader_state_t *bs)
         // Check for reset to the factory firmware or for launch OTA[x] firmware.
         // Customer implementation.
         if ( REG_GET_BIT(GPIO_IN_REG, BIT26) == BIT26) {
-				ESP_LOGE(TAG, "GPIO 26 PRESSED: Booting on FACTORY_INDEX\n");
+				ESP_LOGW(TAG, "GPIO 26 PRESSED: Booting on FACTORY_INDEX\n");
             boot_index = FACTORY_INDEX;
         } 
 #endif
